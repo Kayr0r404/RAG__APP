@@ -1,0 +1,6 @@
+.RAG_VENV
+.env
+__pycache__/
+.venv/
+.python-version
+.streamlit/
