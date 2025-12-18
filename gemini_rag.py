@@ -1,35 +1,17 @@
 import streamlit as st
-import time
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any
 import requests
 from io import BytesIO
-
 from google import genai
 from google.genai import types
 from google.genai import errors
-import datetime
-from dotenv import load_dotenv
-
-# LangChain imports
 from langchain_community.document_loaders.pdf import BaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pymongo import MongoClient
 from pymongo.operations import SearchIndexModel
 from pymongo.errors import OperationFailure
 
-# MongoDB imports
-from pymongo import MongoClient
-from pydantic import BaseModel, Field
 
-load_dotenv()
-
-# --- Custom PDF Loader for Remote URLs ---
-# PyPDFLoader is designed for local paths. For remote URLs, it's safer
-# to download the file content into a BytesIO object and pass that to PyPDFLoader,
-# but since the raw content is the most important part, we'll create a simple
-# loader that retrieves the document content and page number/source.
-
-
-# Using a standard LangChain Loader class structure for compatibility
 class RemoteURLLoader(BaseLoader):
     """Robust loader for remote PDFs with validation."""
 
@@ -100,7 +82,6 @@ class RemoteURLLoader(BaseLoader):
 
 class GeminiRAG:
     """
-    Production-ready RAG pipeline using:
     - Gemini embeddings
     - Gemini generation
     - MongoDB Atlas Vector Search
@@ -133,7 +114,6 @@ class GeminiRAG:
             chunk_overlap=chunk_overlap,
         )
 
-        # Use the GenerativeModel from the client
         self.llm = self.client.models.get(model=self.chat_model)
 
     def _embed(self, text: str, task_type: str) -> List[float]:
@@ -178,15 +158,10 @@ class GeminiRAG:
     def index_pdf(self, pdf_url: str) -> None:
         """Load PDF, chunk, embed, and store in MongoDB"""
 
-        # **IMPROVEMENT: Removed simple document count check**
-        # A simple document count is a weak check. A better check would be based on
-        # a unique document ID/hash or source URL, but we'll stick to the original
-        # logic of skipping if collection is not empty for simplicity.
         if self.collection.count_documents({}) > 0:
             print("Collection is not empty. Skipping indexing.")
             return
 
-        # **FIX: Use the custom loader for remote PDFs**
         loader = RemoteURLLoader(pdf_url)
         documents = loader.load()
 
@@ -194,13 +169,11 @@ class GeminiRAG:
             print("No documents loaded. Indexing aborted.")
             return
 
-        # LangChain's splitter expects a list of Document objects (or objects with page_content/metadata)
         chunks = self.splitter.split_documents(documents)
         print(f"Split document into {len(chunks)} chunks.")
 
         records = []
         for chunk in chunks:
-            # Add metadata to the record for better context tracking in retrieval
             record = {
                 "text": chunk.page_content,
                 "source": chunk.metadata.get("source", pdf_url),
@@ -216,14 +189,12 @@ class GeminiRAG:
     def create_vector_index(self):
         print(f"Attempting to create vector index '{self.index_name}'...")
 
-        # Define the core index structure
-        # NOTE: The 'fields' list must be inside the 'fields' key of the definition
         index_definition = {
             "fields": [
                 {
                     "type": "vector",
-                    "path": "embedding",  # Ensure this matches your record key exactly
-                    "numDimensions": 3072,  # Match your model's output
+                    "path": "embedding",
+                    "numDimensions": 3072,
                     "similarity": "cosine",
                 }
             ]
@@ -244,18 +215,15 @@ class GeminiRAG:
     # ------------------------------------------------------------------
     # Retrieval
     # ------------------------------------------------------------------
-    # **FIX: Updated return type to better reflect the MongoDB aggregation output**
     def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         Retrieves relevant document chunks from MongoDB Atlas Vector Search.
         Returns a list of dicts: [{"text": ..., "score": ...}, ...]
         """
+
         print(f"Generating embedding for query...")
         query_embedding = self.embed_query(query)
 
-        # **IMPROVEMENT: Added optional '$limit' optimization for better performance in Atlas**
-        # The $limit operator should be applied right after $vectorSearch to improve performance,
-        # but since $vectorSearch already takes a 'limit' parameter, we'll keep the structure.
         pipeline = [
             {
                 "$vectorSearch": {
@@ -267,12 +235,11 @@ class GeminiRAG:
                 }
             },
             {
-                # **IMPROVEMENT: Added 'source' and 'page' to projection for better RAG grounding/debugging**
                 "$project": {
                     "_id": 0,
                     "text": 1,
-                    "source": 1,  # Include source for context
-                    "page": 1,  # Include page number for context
+                    "source": 1,
+                    "page": 1,
                     "score": {"$meta": "vectorSearchScore"},
                 }
             },
@@ -286,23 +253,14 @@ class GeminiRAG:
     # ------------------------------------------------------------------
     def generate_answer(self, query: str, k: int = 5) -> str:
         """Retrieves context and generates an answer using Gemini."""
-        docs = self.retrieve(query, k)
 
-        # **IMPROVEMENT: Formatted context to include source/page info**
-        # This helps the LLM with attribution and can reduce hallucination.
+        docs = self.retrieve(query, k)
         formatted_context = []
         for doc in docs:
-            # Using Markdown to separate context chunks
             context_chunk = f"### Source: {doc.get('source', 'Unknown')} (Page: {doc.get('page', 'N/A')})\n{doc['text']}"
             formatted_context.append(context_chunk)
 
         context = "\n\n---\n\n".join(formatted_context)
-
-        # **FIX & IMPROVEMENT: Revamped prompt for better RAG grounding and clarity**
-        # - Added a clear System Instruction for the persona and task.
-        # - Used clear delimiters (XML-style tags) for context and question, as recommended.
-        # - Explicitly told the model to use ONLY the provided context.
-        # - Removed the dangling `c` at the end of the original prompt.
 
         system_instruction = (
             "You are an expert AI partner with a sophisticated, conversational, and deeply knowledgeable tone. "
@@ -320,7 +278,6 @@ class GeminiRAG:
                 <CONTEXT_DOCUMENTS>
                 {context}
                 </CONTEXT_DOCUMENTS>
-
                 <QUESTION>
                 {query}
                 </QUESTION>

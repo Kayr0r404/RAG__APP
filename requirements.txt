@@ -69,10 +69,6 @@ langgraph-checkpoint==3.0.1
 langgraph-prebuilt==1.0.5
 langgraph-sdk==0.3.0
 langsmith==0.4.59
-llama-index-core==0.14.10
-llama-index-instrumentation==0.4.2
-llama-index-readers-file==0.5.5
-llama-index-workflows==2.11.5
 MarkupSafe==3.0.3
 marshmallow==3.26.1
 multidict==6.7.0
@@ -82,7 +78,6 @@ nest-asyncio==1.6.0
 networkx==3.4.2
 nltk==3.9.2
 numpy==2.2.6
-ollama==0.6.1
 openai==2.11.0
 orjson==3.11.5
 ormsgpack==1.12.1
