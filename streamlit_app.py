@@ -25,21 +25,35 @@ rag = get_rag_instance()
 with st.sidebar:
     st.header("Setup & Indexing")
 
-    uploaded_file = st.file_uploader("Upload a PDF for your knowledge base", type="pdf")
-    if uploaded_file is not None:
-        temp_path = "temp_knowledge.pdf"
-        with open(temp_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-
-        if st.button("Index Document"):
-            with st.spinner("Processing PDF and generating embeddings..."):
-                rag.index_pdf(temp_path)
-                st.success("Document indexed successfully!")
-
     if st.button("Initialize Vector Index"):
         with st.spinner("Creating index on Atlas..."):
             rag.create_vector_index()
             st.success("Index creation submitted! Wait 2-3 mins for Atlas to build it.")
+            
+    # uploaded_file = st.file_uploader("Upload a PDF for your knowledge base", type="pdf")
+    # if uploaded_file is not None:
+    #     temp_path = "temp_knowledge.pdf"
+    #     with open(temp_path, "wb") as f:
+    #         f.write(uploaded_file.getbuffer())
+
+    #     if st.button("Index Document"):
+    #         with st.spinner("Processing PDF and generating embeddings..."):
+    #             try:
+    #                 rag.index_pdf(temp_path)
+    #             except Exception as e:
+    #                 st.error("Indexing failed")
+    #                 st.exception(e)
+    url = st.text_input("Enter PDF or Web URL")
+
+    if st.button("Index from URL"):
+        with st.spinner("Fetching and indexing content..."):
+            try:
+                rag.index_pdf(url)
+                st.success("Content indexed successfully!")
+            except Exception as e:
+                st.error("Indexing failed")
+                st.exception(e)
+
 
 # Main Chat Interface
 st.subheader("Ask a Question")

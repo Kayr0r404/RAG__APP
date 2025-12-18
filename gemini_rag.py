@@ -107,7 +107,17 @@ class GeminiRAG:
         self.index_name = index_name
 
         self.mongo_client = MongoClient(mongo_uri)
-        self.collection = self.mongo_client[db_name][collection_name]
+        db = self.mongo_client[db_name]
+        try:
+            db.drop_collection(collection_name)
+        except Exception:
+            ...
+        
+        try:
+            db.create_collection(collection_name)
+            self.collection = db[collection_name]
+        except OperationFailure:
+            ...
 
         self.splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size,
