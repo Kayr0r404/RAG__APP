@@ -1,0 +1,16 @@
+o.py
+__pycache__
+.venv
+.gitignore
+.git
+temp_knowledge
+rag.py
+mongo.py
+main.py
+.venv
+venv
+__pycache__
+.git
+.ipynb_checkpoints
+*.db
+*.mp4
