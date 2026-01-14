@@ -10,70 +10,73 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymongo import MongoClient
 from pymongo.operations import SearchIndexModel
 from pymongo.errors import OperationFailure
+from pinecone import Pinecone
+
+import os
+import requests
+from io import BytesIO
+from pypdf import PdfReader
+from langfuse import observe, get_client
+
+LANGFUSE_SECRET_KEY = st.secrets["LANGFUSE_SECRET_KEY"]
+LANGFUSE_PUBLIC_KEY = st.secrets["LANGFUSE_PUBLIC_KEY"]
+LANGFUSE_BASE_URL = st.secrets["LANGFUSE_BASE_URL"]
+
+os.environ["LANGFUSE_SECRET_KEY"] = LANGFUSE_SECRET_KEY
+os.environ["LANGFUSE_PUBLIC_KEY"] = LANGFUSE_PUBLIC_KEY
+os.environ["LANGFUSE_BASE_URL"] = LANGFUSE_BASE_URL
+
+langfuse = get_client()
 
 
-class RemoteURLLoader(BaseLoader):
-    """Robust loader for remote PDFs with validation."""
+class Document:
+    """Standard document structure for the RAG pipeline."""
 
-    def __init__(self, url: str, timeout: int = 30):
-        self.url = url
-        self.timeout = timeout
+    def __init__(self, page_content: str, metadata: dict):
+        self.page_content = page_content
+        self.metadata = metadata
 
-    def load(self):
+
+class UniversalPDFLoader:
+    @staticmethod
+    @observe(name="pdf_loading")  # Langfuse will track how long loading takes
+    def load(source: str) -> list[Document]:
+        is_remote = source.startswith(("http://", "https://"))
+
         try:
-            print(f"Fetching PDF from {self.url}...")
-
-            headers = {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0 Safari/537.36"
+            if is_remote:
+                print(f"Fetching remote PDF: {source}")
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+                }
+                response = requests.get(
+                    source, headers=headers, stream=True, timeout=30
                 )
-            }
+                response.raise_for_status()
+                pdf_data = BytesIO(response.content)
+            else:
+                print(f"Loading local PDF: {source}")
+                pdf_data = open(source, "rb")
 
-            response = requests.get(
-                self.url,
-                headers=headers,
-                stream=True,
-                allow_redirects=True,
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-
-            content_type = response.headers.get("Content-Type", "").lower()
-
-            if "application/pdf" not in content_type:
-                raise ValueError(
-                    f"URL did not return a PDF. " f"Content-Type='{content_type}'"
-                )
-
-            from pypdf import PdfReader
-
-            pdf_stream = BytesIO(response.content)
-            reader = PdfReader(pdf_stream)
-
-            documents = []
+            reader = PdfReader(pdf_data)
+            docs = []
             for i, page in enumerate(reader.pages):
                 text = page.extract_text() or ""
-                documents.append(
-                    {
-                        "page_content": text,
-                        "metadata": {
-                            "source": self.url,
-                            "page": i + 1,
-                        },
-                    }
+                docs.append(
+                    Document(
+                        page_content=text, metadata={"source": source, "page": i + 1}
+                    )
                 )
 
-            class SimpleDocument:
-                def __init__(self, page_content, metadata):
-                    self.page_content = page_content
-                    self.metadata = metadata
+            # Update Langfuse with the number of pages loaded
+            # langfuse.update_current_observation(metadata={"pages_loaded": len(docs)})
 
-            return [SimpleDocument(d["page_content"], d["metadata"]) for d in documents]
+            if not is_remote:
+                pdf_data.close()
+            return docs
 
         except Exception as e:
-            print(f"Error processing remote PDF: {e}")
+            print(f"Error loading {source}: {e}")
             return []
 
 
@@ -93,13 +96,20 @@ class GeminiRAG:
         db_name: str,
         collection_name: str,
         embedding_model="models/gemini-embedding-001",
-        chat_model: str = "gemini-2.5-flash",
+        chat_model: str = "gemini-3-flash-preview",
         embedding_dim: int = 3072,
         index_name: str = "vector_index",
-        chunk_size: int = 400,
-        chunk_overlap: int = 20,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
     ):
         self.client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+
+        # PINECONE
+        pc = Pinecone(api_key=st.secrets["PINECONE_API_KEY"])
+        if not pc.has_index(index_name):
+            # pc.create_index()
+            ...
+            l = ""
 
         self.embedding_model = embedding_model
         self.chat_model = chat_model
@@ -112,7 +122,7 @@ class GeminiRAG:
             db.drop_collection(collection_name)
         except Exception:
             ...
-        
+
         try:
             db.create_collection(collection_name)
             self.collection = db[collection_name]
@@ -166,35 +176,78 @@ class GeminiRAG:
     # Indexing
     # ------------------------------------------------------------------
     def index_pdf(self, pdf_url: str) -> None:
-        """Load PDF, chunk, embed, and store in MongoDB"""
+        """
+        Ingest a PDF into MongoDB Atlas Vector Search.
+        Safe, idempotent, and batch-embedded.
+        """
 
-        if self.collection.count_documents({}) > 0:
-            print("Collection is not empty. Skipping indexing.")
+        # 1. Prevent duplicate indexing (document-level)
+        if self.collection.count_documents({"metadata.source": pdf_url}) > 0:
+            print(f"PDF already indexed: {pdf_url}")
             return
 
-        loader = RemoteURLLoader(pdf_url)
-        documents = loader.load()
+        print(f"Indexing PDF: {pdf_url}")
+
+        # 2. Load document
+        try:
+            loader = RemoteURLLoader(pdf_url)
+            documents = loader.load()
+        except Exception as e:
+            raise RuntimeError(f"Failed to load PDF: {e}")
 
         if not documents:
             print("No documents loaded. Indexing aborted.")
             return
 
+        # 3. Split into chunks
         chunks = self.splitter.split_documents(documents)
-        print(f"Split document into {len(chunks)} chunks.")
 
+        if not chunks:
+            print("No chunks generated. Indexing aborted.")
+            return
+
+        print(f"Split document into {len(chunks)} chunks")
+
+        # 4. Prepare texts for batch embedding
+        texts = [chunk.page_content for chunk in chunks]
+
+        # 5. Generate embeddings (batch)
+        try:
+            embeddings = self.embed_document(texts)
+        except Exception as e:
+            raise RuntimeError(f"Embedding failed: {e}")
+
+        if len(embeddings) != len(texts):
+            raise ValueError("Mismatch between texts and embeddings")
+
+        # 6. Build records
         records = []
-        for chunk in chunks:
+
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            if not embedding or len(embedding) != self.embedding_dim:
+                raise ValueError(
+                    f"Invalid embedding at chunk {i}: "
+                    f"expected {self.embedding_dim}, got {len(embedding) if embedding else 'None'}"
+                )
+
+            page = chunk.metadata.get("page", "N/A")
+
             record = {
+                "_id": f"{pdf_url}::page_{page}::chunk_{i}",
                 "text": chunk.page_content,
-                "source": chunk.metadata.get("source", pdf_url),
-                "page": chunk.metadata.get("page", "N/A"),
-                "embedding": self.embed_document(chunk.page_content),
+                "embedding": embedding,
+                "metadata": {"source": pdf_url, "page": page, "chunk_index": i},
             }
+
             records.append(record)
 
-        print(f"Inserting {len(records)} records into MongoDB...")
-        self.collection.insert_many(records)
-        print("Indexing complete.")
+        # 7. Insert into MongoDB
+        try:
+            self.collection.insert_many(records, ordered=False)
+        except Exception as e:
+            raise RuntimeError(f"Failed to insert records: {e}")
+
+        print(f"Indexing complete. {len(records)} chunks stored.")
 
     def create_vector_index(self):
         print(f"Attempting to create vector index '{self.index_name}'...")

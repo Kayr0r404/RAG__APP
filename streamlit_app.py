@@ -1,5 +1,7 @@
 import streamlit as st
 from gemini_rag import GeminiRAG
+from rg import GeminiRAG
+
 
 st.set_page_config(page_title="RAG Assistant", page_icon="./icon.png")
 col1, col2 = st.columns([1, 8])
@@ -13,10 +15,11 @@ with col2:
 
 @st.cache_resource
 def get_rag_instance():
-    mongo_uri = f"mongodb+srv://{st.secrets['MONGODB_USER']}:{st.secrets['MONGODB_PASSWORD']}@rag.gliqall.mongodb.net/?appName=RAG"
-    return GeminiRAG(
-        mongo_uri=mongo_uri, db_name="sample_mflix", collection_name="ragpdf"
-    )
+    # mongo_uri = f"mongodb+srv://{st.secrets['MONGODB_USER']}:{st.secrets['MONGODB_PASSWORD']}@rag.gliqall.mongodb.net/?appName=RAG"
+    # return GeminiRAG(
+    #     mongo_uri=mongo_uri, db_name="sample_mflix", collection_name="ragpdf"
+    # )
+    return GeminiRAG(index_name="gemini-rag-index")
 
 
 rag = get_rag_instance()
@@ -29,13 +32,13 @@ with st.sidebar:
         with st.spinner("Creating index on Atlas..."):
             rag.create_vector_index()
             st.success("Index creation submitted! Wait 2-3 mins for Atlas to build it.")
-            
+
     url = st.text_input("Enter PDF or Web URL")
 
     if st.button("Index from URL"):
         with st.spinner("Fetching and indexing content..."):
             try:
-                
+
                 rag.index_pdf(url)
                 st.success("Content indexed successfully!")
             except Exception as e:
