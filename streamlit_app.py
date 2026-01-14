@@ -15,10 +15,6 @@ with col2:
 
 @st.cache_resource
 def get_rag_instance():
-    # mongo_uri = f"mongodb+srv://{st.secrets['MONGODB_USER']}:{st.secrets['MONGODB_PASSWORD']}@rag.gliqall.mongodb.net/?appName=RAG"
-    # return GeminiRAG(
-    #     mongo_uri=mongo_uri, db_name="sample_mflix", collection_name="ragpdf"
-    # )
     return GeminiRAG(index_name="gemini-rag-index")
 
 
