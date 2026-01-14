@@ -1,5 +1,4 @@
 import streamlit as st
-from gemini_rag import GeminiRAG
 from rg import GeminiRAG
 
 
