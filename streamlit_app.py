@@ -1,19 +1,25 @@
 import streamlit as st
 from gemini_rag import GeminiRAG
 from config.env_loader import load_env
-from io import StringIO
+import json
 import os
 
 load_env()
 
 
+def save_session_state(target_file, current_session_state):
+    with open(file=target_file, mode="w", encoding="utf-8") as file:
+        json.dump(current_session_state, file, indent=4)
+    return
+
+
 def streamlit_app():
     st.set_page_config(page_title="RAG Assistant", page_icon="./icon.png")
-    col1, col2 = st.columns([1, 8])
 
+    # Layout
+    col1, col2 = st.columns([1, 8])
     with col1:
         st.image("./icon.png", width=60)
-
     with col2:
         st.title("Knowledge Assistant")
 
@@ -23,59 +29,59 @@ def streamlit_app():
 
     rag = get_rag_instance()
 
-    # Sidebar Setup
+    # Sidebar: Setup & Indexing
     with st.sidebar:
         st.header("Setup & Indexing")
-
         if st.button("Initialize Vector Index"):
-            with st.spinner("Creating index on Atlas..."):
+            with st.spinner("Creating index..."):
                 rag.create_vector_index()
-                st.success(
-                    "Index creation submitted! Wait 2-3 mins for Atlas to build it."
-                )
+                st.success("Index creation submitted!")
 
         url = st.text_input("Enter PDF or Web URL")
-        # uploaded_file = st.file_uploader("Choose a file")
         uploaded_file = st.file_uploader("Upload a file", type=["csv", "pdf", "txt"])
-        if st.button("Index"):
+
+        if st.button("Index Content"):
             save_path = "temp_knowledge"
-            if uploaded_file is not None:
-                if not os.path.exists(save_path):
-                    os.makedirs(save_path)
-                    
-                file_path = os.path.join(save_path, uploaded_file.name)
-                
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                print(f"./{save_path}/{uploaded_file.name}")
-                rag.index_pdf(f"./{save_path}/{uploaded_file.name}")
-                st.success("Content indexed successfully!")
-            else:
-                with st.spinner("Fetching and indexing content..."):
-                    try:
-                        rag.index_pdf(url)
-                        st.success("Content indexed successfully!")
-                    except Exception as e:
-                        st.error("Indexing failed")
-                        st.exception(e)
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
 
-    # Main Chat Interface
-    st.subheader("Ask a Question")
-    with st.form("query_form"):
-        query = st.text_area(
-            "Context-based Question:",
-            placeholder="e.g., What are the key points of the document?",
-        )
-        submitted = st.form_submit_button("Ask")
+            with st.spinner("Indexing..."):
+                target = url
+                if uploaded_file:
+                    target = os.path.join(save_path, uploaded_file.name)
+                    with open(target, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
 
-        if submitted:
-            if query:
-                with st.spinner("Searching knowledge base..."):
-                    answer = rag.generate_answer(query)
-                    st.markdown("### Answer")
-                    st.write(answer)
-            else:
-                st.warning("Please enter a question first.")
+                if target:
+                    rag.index_pdf(target)
+                    st.success("Content indexed successfully!")
+
+    # --- Chat Interface ---
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    # Display chat history from session state on rerun
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask me anything about your documents..."):
+        # Display user message
+        st.chat_message("user").markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        # Display assistant response
+        with st.chat_message("assistant"):
+            response = rag.generate_answer(prompt)
+            st.write(response)
+            st.session_state.messages.append({"role": "assistant", "content": response})
+            save_path = "data_storage"
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            target = os.path.join(save_path, "session_history.json")
+            save_session_state(
+                target, {"messages": st.session_state.get("messages", [])}
+            )
 
 
 if __name__ == "__main__":
