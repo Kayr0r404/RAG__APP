@@ -1,17 +1,7 @@
-import os
 import requests
 from io import BytesIO
 from pypdf import PdfReader
 from langfuse import observe, get_client
-import streamlit as st
-
-LANGFUSE_SECRET_KEY = st.secrets["LANGFUSE_SECRET_KEY"]
-LANGFUSE_PUBLIC_KEY = st.secrets["LANGFUSE_PUBLIC_KEY"]
-LANGFUSE_BASE_URL = st.secrets["LANGFUSE_BASE_URL"]
-
-os.environ["LANGFUSE_SECRET_KEY"] = LANGFUSE_SECRET_KEY
-os.environ["LANGFUSE_PUBLIC_KEY"] = LANGFUSE_PUBLIC_KEY
-os.environ["LANGFUSE_BASE_URL"] = LANGFUSE_BASE_URL
 
 langfuse = get_client()
 

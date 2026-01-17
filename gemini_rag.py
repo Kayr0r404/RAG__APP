@@ -3,22 +3,14 @@ from pinecone import Pinecone
 from google import genai
 from google.genai import types
 from langfuse import observe, get_client
-from os import environ
 from universal_pdf_loader import UniversalPDFLoader
 import streamlit as st
-
-LANGFUSE_SECRET_KEY = st.secrets["LANGFUSE_SECRET_KEY"]
-LANGFUSE_PUBLIC_KEY = st.secrets["LANGFUSE_PUBLIC_KEY"]
-LANGFUSE_BASE_URL = st.secrets["LANGFUSE_BASE_URL"]
-
-environ["LANGFUSE_SECRET_KEY"] = LANGFUSE_SECRET_KEY
-environ["LANGFUSE_PUBLIC_KEY"] = LANGFUSE_PUBLIC_KEY
-environ["LANGFUSE_BASE_URL"] = LANGFUSE_BASE_URL
 
 langfuse = get_client()
 
 
 class GeminiRAG:
+    @observe()
     def __init__(self, index_name: str):
         self.client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
         self.pc = Pinecone(api_key=st.secrets["PINECONE_API_KEY"])
@@ -54,7 +46,6 @@ class GeminiRAG:
                         "metadata": {"text": chunk, "source": doc.metadata["source"]},
                     }
                 )
-
         self.index.upsert(vectors=to_upsert)
 
     @observe()
@@ -71,7 +62,6 @@ class GeminiRAG:
         )
 
         answer = response.text
-
         langfuse.update_current_trace(output=answer)
 
         return answer

@@ -1,5 +1,5 @@
 # Use a specific version for stability
-FROM python:3.13-slim-bookworm
+FROM python:3.10.12
 
 # Prevent python from writing pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 8501
 
 # Using the full path or module execution is often safer
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=127.0.0.1"]
+CMD ["streamlit", "run", "streamlit_app.py", "--server.port=8501"]
