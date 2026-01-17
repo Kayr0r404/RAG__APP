@@ -44,9 +44,7 @@ def streamlit_app():
                     os.makedirs(save_path)
                     
                 file_path = os.path.join(save_path, uploaded_file.name)
-                print(file_path)
-
-                # 2. Write the bytes to a new file
+                
                 with open(file_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
                 print(f"./{save_path}/{uploaded_file.name}")
